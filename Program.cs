@@ -1,63 +1,73 @@
 ﻿using System;
 using System.Threading.Tasks;
-using Azure.Messaging.ServiceBus;//For Sending values to Service Bus Queueu
+using Azure.Messaging.ServiceBus;
 
-namespace QueueSender
+namespace QueueRecieverApp
 {
     class Program
     {
-
-        /*
-         * Connection String for your service bus request
-         * Name of the Service Bus Queue
-         * Client that owns the connection and can be used to create sender and reciever 
-         * The sender used to publish the message to the queue
-         * Number of message to be sent to the queue
-          */
-        static string connectionstring = "Endpoint=sb://mysericebusdemo.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=vtJBjAIb9vktHlfyvbIO5GHzCsGeebGHKDf5ioOZPT0=";
-        static string queuename = "myqueue";
+        //Connection String
+        static string connectionString = "Endpoint=sb://mysericebusdemo.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=vtJBjAIb9vktHlfyvbIO5GHzCsGeebGHKDf5ioOZPT0=";
+        //name of our Service Bus Queue
+        static string queueName = "myqueue";
+        //the Client that owns the connection and can be used to create senders reciever
         static ServiceBusClient client;
-        static ServiceBusSender sender;
-        private const int NumofMessages = 5;
+        //the Processor that reads and process the message from the Queue
+        static ServiceBusProcessor processor;
 
+
+        //Method1: For Handling Recieved messages and Displaying them 
+        static async Task MessageHandler(ProcessMessageEventArgs args)
+        {
+            string body = args.Message.Body.ToString();
+            Console.WriteLine($"Recieved: {body}");
+            //Complete the message. message is deleted from the queue.
+            await args.CompleteMessageAsync(args.Message);
+        }
+
+
+        //Method2: Handling any error when recieveing messages and Displaying them
+         static Task ErrorHandler(ProcessErrorEventArgs args)
+        {
+            Console.WriteLine(args.Exception.ToString());
+            return Task.CompletedTask;
+        }
 
         static async Task Main(string[] args)
         {
-            Console.WriteLine("Weocome to the demo on implementing Service Bus Queue ");
-            //Creating Client Object 
-            client = new ServiceBusClient(connectionstring);
-            sender = client.CreateSender(queuename);
+            Console.WriteLine("Demo for Receiving Message from Service Bus..");
 
-            //Creating a Batch
-            using ServiceBusMessageBatch messageBatch = await sender.CreateMessageBatchAsync();
-            for (int i = 1; i < NumofMessages; i++)
-            {
-                if (!messageBatch.TryAddMessage(new ServiceBusMessage($"Message {i}")))
-                {
-                    throw new Exception($" The Message {i} is too large to fit in the batch.");
-                }
-            }
+            //Creating a Client Object so that we can create Sender and reciever object
+            client = new ServiceBusClient(connectionString);
+
+            //Creating a prcoessor that can be used to process the messages 
+            processor = client.CreateProcessor(queueName, new ServiceBusProcessorOptions());
+
 
             try
             {
-                //use the producer client to send the batch of messages to the Service Bus Queue
-                await sender.SendMessagesAsync(messageBatch);
-                Console.WriteLine($"A Batch of {NumofMessages} messages has been published to the queue");
+                //Add Handler to process messages
+                processor.ProcessMessageAsync += MessageHandler;
+
+                //Add Handler to process any errors
+                processor.ProcessErrorAsync += ErrorHandler;
+                //Start processing 
+                await processor.StartProcessingAsync();
+                Console.WriteLine("Wait for a Minute and THEN PRESS ANY KEY TO END the Processing  :-) ");
+                Console.ReadKey();
+
+                //Stop processing
+                Console.WriteLine("\n Stopping the Receiver..... ");
+                await processor.StopProcessingAsync();
+                Console.WriteLine("Stopped recieving messages....!!! ");
             }
-            catch (Exception e)
-            {
-                Console.WriteLine("Exception Caught"+e.Message);
-                throw;
-            }
+            
             finally
             {
-                //Calling DisposeAsync on a client Tyoe is required to ensure that network resource and other 
-                // unmanaged objects are propoerly cleaned up
-                await sender.DisposeAsync();
+                //Calling disposeAsync on clients types is required to ensure that objects are properly cleaned up.
+                await processor.DisposeAsync();
                 await client.DisposeAsync();
             }
-            Console.WriteLine("Press any key to end the Application");
-
         }
     }
 }
